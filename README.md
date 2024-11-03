@@ -1,4 +1,4 @@
-# ELRS Backpack send data to ESP8266
+# ELRS Backpack send data via ESPNOW to ESP8266 
  Backpack Expresslrs Example with ESP8266 and CRSF Protokoll
 
 # Config the sketch:
