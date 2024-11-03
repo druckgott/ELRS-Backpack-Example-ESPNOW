@@ -1,0 +1,6 @@
+{
+    "files.associations": {
+        "bitset": "cpp",
+        "chrono": "cpp"
+    }
+}
