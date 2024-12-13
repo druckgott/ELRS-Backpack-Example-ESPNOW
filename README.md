@@ -1,5 +1,5 @@
-# ELRS Backpack send data via ESPNOW to ESP8266 
- Backpack Expresslrs Example with ESP8266 and CRSF Protokoll
+# ELRS Backpack send data via ESPNOW to ESP8266/ESP32 
+ Backpack Expresslrs Example with ESP8266/ESP32 and CRSF Protokoll
 
 # Config the sketch:
  * On the website https://expresslrs.github.io/web-flasher/, the private UID must be generated (using the same password as the ELRS system).
