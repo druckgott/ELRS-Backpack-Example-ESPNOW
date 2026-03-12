@@ -1,126 +1,177 @@
-#include <Arduino.h>
-#include <terseCRSF.h>  // https://github.com/zs6buj/terseCRSF   use v 0.0.6 or later
 // crsf.cpp
 #include "crsf.h"
+#include "logging.h"
+#include <math.h>
+#include <string>
 
-CRSF crsf;  // Instanziierung des CRSF-Objekts
+CRSF crsf;
 
-int16_t  espnow_len = 0;
-int16_t  crsf_len = 0;
+int16_t espnow_len = 0;
+int16_t crsf_len = 0;
 bool espnow_received = false;
 
-uint8_t  hud_num_sats = 0; 
+uint8_t  hud_num_sats = 0;
 float    hud_grd_spd = 0;
-int16_t  hud_bat1_volts = 0;     // dV (V * 10)
-int16_t  hud_bat1_amps = 0;      // dA )A * 10)
+int16_t  hud_bat1_volts = 0;
+int16_t  hud_bat1_amps = 0;
 uint16_t hud_bat1_mAh = 0;
 
 struct Location {
-  float lat; //long
-  float lon;
-  float alt;
-  float hdg;
-  float alt_ag;     
+    float lat;
+    float lon;
+    float alt;
+    float hdg;
+    float alt_ag;
 };
 
-struct Location hom     = {
-  0,0,0,0
-};   // home location
-struct Location cur      = {
-  0,0,0,0
-};   // current location
+Location hom = {0,0,0,0,0};
+Location cur = {0,0,0,0,0};
 
-bool gpsGood = false; 
-bool gpsPrev = false; 
-bool hdgGood = false;       
-bool serGood = false; 
+bool gpsGood = false;
+bool gpsfixGood = false;
 bool lonGood = false;
 bool latGood = false;
-bool altGood = false;               
-bool boxhdgGood = false; 
-bool motArmed = false;   // motors armed flag
-bool gpsfixGood = false;
- 
+bool altGood = false;
+bool hdgGood = false;
+bool motArmed = false;
 bool finalHomeStored = false;
 
-uint32_t  gpsGood_millis = 0;
+uint32_t gpsGood_millis = 0;
 
-void crsfReceive() 
+/* ========================================================= */
+
+void crsfReceive()
 {
-  if (espnow_received)  // flag
-  {
-    espnow_received = false;
-    int16_t len = espnow_len;
-    uint8_t crsf_id = crsf.decodeTelemetry(&*crsf.crsf_buf, len);
-    //log.printf("crsf_id:%2X\n", crsf_id);
-    if (crsf_id == GPS_ID)   // 0x02
-    {
-      // don't use gps heading, use attitude yaw below
-      cur.lon = crsf.gpsF_lon;
-      cur.lat = crsf.gpsF_lat;    
-      cur.alt = crsf.gps_altitude;
-      gpsfixGood = (crsf.gps_sats >=5);  // with 4 sats, altitude value can be bad
-      lonGood = (crsf.gpsF_lon != 0.0);
-      latGood = (crsf.gpsF_lat != 0.0);
-      altGood = (crsf.gps_altitude != 0);
-      hdgGood = true; 
-      if ((finalHomeStored))
-      {
-        cur.alt_ag = cur.alt - hom.alt;
-      } else 
-      {
-        cur.alt_ag = 0;
-      }           
-      hud_num_sats = crsf.gps_sats;         // these for the display
-      hud_grd_spd = crsf.gpsF_groundspeed;   
-      log.print("GPS id:");
-      crsf.printByte(crsf_id, ' ');
-      log.printf("lat:%2.7f  lon:%2.7f", crsf.gpsF_lat, crsf.gpsF_lon);
-      log.printf("  ground_spd:%.1fkm/hr", crsf.gpsF_groundspeed);
-      log.printf("  hdg:%.2fdeg", crsf.gpsF_heading);
-      log.printf("  alt:%dm", crsf.gps_altitude);
-      log.printf("  sats:%d", crsf.gps_sats); 
-      log.printf("  gpsfixGood:%d", gpsfixGood); 
-      log.printf("  hdgGood:%d\n", hdgGood);          
-    }
-    if (crsf_id == BATTERY_ID) 
-    { 
-      hud_bat1_volts = crsf.batF_voltage;           
-      hud_bat1_amps = crsf.batF_current;
-      hud_bat1_mAh = crsf.batF_fuel_drawn * 1000;       
-      log.print("BATTERY id:");
-      crsf.printByte(crsf_id, ' ');
-      log.printf("volts:%2.1f", crsf.batF_voltage);
-      log.printf("  amps:%3.1f", crsf.batF_current);
-      log.printf("  Ah_drawn:%3.1f", crsf.batF_fuel_drawn);
-     log.printf("  remaining:%3u%%\n", crsf.bat_remaining);
-    }
-   
-    if (crsf_id == ATTITUDE_ID)
-    {
-      cur.hdg = crsf.attiF_yaw;
-      log.print("ATTITUDE id:");
-      crsf.printByte(crsf_id, ' '); 
-      log.printf("pitch:%3.1fdeg", crsf.attiF_pitch);
-      log.printf("  roll:%3.1fdeg", crsf.attiF_roll);
-      log.printf("  yaw:%3.1fdeg\n", crsf.attiF_yaw);           
-    }    
+    if (espnow_len <= 0)
+        return;
 
-    if (crsf_id == FLIGHT_MODE_ID)
+    int16_t len = espnow_len;
+    espnow_len = 0;
+
+    uint8_t crsf_id = crsf.decodeTelemetry(crsf.crsf_buf, len);
+
+#if LOG_LEVEL >= LOG_LEVEL_DEBUG
+    LOG_DEBUG("CRSF ID: 0x%02X", crsf_id);
+#endif
+
+    switch (crsf_id)
     {
-      motArmed = !(crsf.flightMode.compare("ARM"));  // Returns 0 if both the strings are the same
-      log.print("FLIGHT_MODE id:");
-      crsf.printByte(crsf_id, ' ');
-      log.printf("lth:%u %s motArmed:%u\n", crsf.flight_mode_lth, crsf.flightMode.c_str(), motArmed);
-    gpsGood = (gpsfixGood & lonGood & latGood & altGood);    
-    if (gpsGood) gpsGood_millis = millis();     // Time of last good GPS packet 
+        /* ================= GPS ================= */
+        case GPS_ID:
+        {
+            cur.lat = crsf.gpsF_lat;
+            cur.lon = crsf.gpsF_lon;
+            cur.alt = crsf.gps_altitude;
+
+            gpsfixGood = (crsf.gps_sats >= 5);
+            lonGood = (crsf.gpsF_lon != 0.0f);
+            latGood = (crsf.gpsF_lat != 0.0f);
+            altGood = (crsf.gps_altitude != 0);
+
+            gpsGood = gpsfixGood && lonGood && latGood && altGood;
+
+            if (finalHomeStored)
+                cur.alt_ag = cur.alt - hom.alt;
+            else
+                cur.alt_ag = 0;
+
+            hud_num_sats = crsf.gps_sats;
+            hud_grd_spd  = crsf.gpsF_groundspeed;
+
+            static float lastLat = 999;
+            static float lastLon = 999;
+
+            if (fabs(cur.lat - lastLat) > 0.000001f ||
+                fabs(cur.lon - lastLon) > 0.000001f)
+            {
+                LOG_INFO("GPS: %.7f, %.7f alt=%d sats=%d",
+                         cur.lat,
+                         cur.lon,
+                         crsf.gps_altitude,
+                         crsf.gps_sats);
+
+                lastLat = cur.lat;
+                lastLon = cur.lon;
+            }
+
+            if (gpsGood)
+                gpsGood_millis = millis();
+
+        } break;
+
+        /* ================= BATTERY ================= */
+        case BATTERY_ID:
+        {
+            hud_bat1_volts = crsf.batF_voltage;
+            hud_bat1_amps  = crsf.batF_current;
+            hud_bat1_mAh   = crsf.batF_fuel_drawn * 1000;
+
+            static int16_t lastVolt = -9999;
+
+            if (hud_bat1_volts != lastVolt)
+            {
+                LOG_INFO("BAT: %.1fV %.1fA %u%%",
+                         crsf.batF_voltage,
+                         crsf.batF_current,
+                         crsf.bat_remaining);
+
+                lastVolt = hud_bat1_volts;
+            }
+
+        } break;
+
+        /* ================= ATTITUDE ================= */
+        case ATTITUDE_ID:
+        {
+            cur.hdg = crsf.attiF_yaw;
+
+            static float lastPitch = 999;
+
+            if (fabs(crsf.attiF_pitch - lastPitch) > 0.1f)
+            {
+                LOG_INFO("ATT: p=%.1f r=%.1f y=%.1f",
+                         crsf.attiF_pitch,
+                         crsf.attiF_roll,
+                         crsf.attiF_yaw);
+
+                lastPitch = crsf.attiF_pitch;
+            }
+
+        } break;
+
+        /* ================= FLIGHT MODE ================= */
+        case FLIGHT_MODE_ID:
+        {
+            motArmed = (crsf.flightMode.compare("ARM") == 0);
+
+            static std::string lastMode = "";
+
+            if (crsf.flightMode != lastMode)
+            {
+                LOG_INFO("MODE: %s Armed:%d",
+                         crsf.flightMode.c_str(),
+                         motArmed);
+
+                lastMode = crsf.flightMode;
+            }
+
+            gpsGood = (gpsfixGood && lonGood && latGood && altGood);
+
+        } break;
+
+        default:
+            break;
     }
-  }      
-  
-  static bool prevGpsGood = 0;
-  if (gpsGood != prevGpsGood)
-  {
-    log.printf("gpsGood:%u  gpsfixGood:%u  lonGood:%u  latGood:%u  altGood:%u  hdgGood:%u  boxhdgGood:%u \n", gpsGood, gpsfixGood, lonGood, latGood, altGood, hdgGood, boxhdgGood);  
-    prevGpsGood = gpsGood;
-  }      
-}     
+
+    /* ================= GPS STATUS CHANGE ================= */
+
+    static bool prevGpsGood = false;
+
+    if (gpsGood != prevGpsGood)
+    {
+        LOG_INFO("GPS Status changed: gpsGood=%d",
+                 gpsGood);
+
+        prevGpsGood = gpsGood;
+    }
+}

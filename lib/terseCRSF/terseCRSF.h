@@ -58,7 +58,8 @@
 
 //==========================================
 
-#define log   Serial
+//#define log   Serial
+#define log if(false) Serial
 
 #define RADS2DEGS 180 / PI
 
