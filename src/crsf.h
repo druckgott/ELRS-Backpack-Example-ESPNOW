@@ -1,6 +1,10 @@
-// crsf.h
+#pragma once
 #ifndef CRSF_H
 #define CRSF_H
+
+#include <Arduino.h>
+#include <terseCRSF.h>  // https://github.com/zs6buj/terseCRSF   use v 0.0.6 or later
+// crsf.h
 
 // Deklarationen der Variablen
 extern int16_t espnow_len;
