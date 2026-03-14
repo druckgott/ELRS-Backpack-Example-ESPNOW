@@ -28,6 +28,13 @@
 #include <espnow.h>
 #endif
 
+enum RadioMode
+{
+    MODE_RX_ONLY = 0,
+    MODE_TX_ONLY = 1,
+    MODE_BOTH    = 2
+};
+
 // ======================================================
 // 3. Configuration (Defines, UID, WiFi, Logging)
 // ======================================================
@@ -40,6 +47,29 @@
 // Config Elrs Binding
 //uint8_t UID[6] = {0,0,0,0,0,0}; // this is my UID. You have to change it to your once, should look 
 uint8_t UID[6] = {106,19,19,206,193,30};
+
+// ======================================================
+// RadioMode Configuration
+// ======================================================
+//
+// MODE_RX_ONLY  : Only receive ESP-NOW data (telemetry).
+//                 Sending (trainer/VTX channels) is disabled.
+//
+// MODE_TX_ONLY  : Only send ESP-NOW data (trainer/VTX channels).
+//                 Receiving telemetry is disabled.
+//
+// MODE_BOTH     : Send and receive ESP-NOW data.
+//                 Full bidirectional operation.
+//
+// You can change the default mode below.
+// It can also be changed later via Serial commands.
+// ======================================================
+RadioMode radioMode = MODE_BOTH;   // Default startup mode
+
+// Time window (in milliseconds) after boot during which
+// the RadioMode can be changed via Serial commands.
+// After this time, the mode becomes fixed.
+const unsigned long CONFIG_WINDOW_MS = 5000;  // 5 seconds
 
 // ===== AP Wifi Config =====
 const char* ssid = "Backpack_ELRS_Crsf";           // SSID des Access Points
@@ -56,13 +86,14 @@ float wavePhase = 0.0;
 
 // ===== Logging Level =====
 //#define LOG_LEVEL LOG_LEVEL_INFO   // oder INFO
-#define LOG_LEVEL LOG_LEVEL_DEBUG
+#define LOG_LEVEL LOG_LEVEL_INFO
 #include "logging.h"
 
 // ======================================================
 // 4. Global Objects
 // ======================================================
 
+unsigned long configWindowStart = 0;
 uint16_t rampChannels[NUM_CHANNELS];
 uint32_t lastStepTime = 0;
 uint8_t activeChannel = 0;
@@ -126,19 +157,6 @@ LOG_DEBUG("Data: %s", hexBuffer);
 // ======================================================
 // ESP-NOW Send Callback
 // ======================================================
-/*#if defined(ESP32)
-void OnDataSent(const uint8_t *mac_addr, esp_now_send_status_t status) {
-#else
-void OnDataSent(uint8_t *mac_addr, uint8_t status) {
-#endif
-
-    if (status == 0) {
-        LOG_DEBUG("ESP-NOW Send OK");
-    } else {
-        LOG_WARN("ESP-NOW Send FAIL - Backpack nicht erreichbar (status=%d)", status);
-    }
-
-}*/
 
 #if defined(ESP32)
 void OnDataSent(const uint8_t *mac_addr, esp_now_send_status_t status) {
@@ -151,9 +169,9 @@ void OnDataSent(uint8_t *mac_addr, uint8_t status) {
 #endif
 
     if (success) {
-        LOG_DEBUG("ESP-NOW Send OK");
+        LOG_DEBUG_INLINE("ESP-NOW Send OK          ");
     } else {
-        LOG_WARN("ESP-NOW Send FAIL (Status: %d)", status);
+        LOG_ERROR_INLINE("ESP-NOW Send FAIL (Status: %d) t=%lu ms      ", status, millis());
     }
 }
 
@@ -235,6 +253,16 @@ void initESP32Queue()
 #endif
 }
 
+void initInfo()
+{
+    LOG_INFO("Config window active for %lu ms", CONFIG_WINDOW_MS);
+    LOG_INFO("Send via Serial:");
+    LOG_INFO("  1 = RX_ONLY");
+    LOG_INFO("  2 = TX_ONLY");
+    LOG_INFO("  3 = BOTH");
+    configWindowStart = millis();
+}
+
 void setup() {
     initSerial();
     initWiFi();
@@ -243,6 +271,7 @@ void setup() {
     initESPNow();
     vrxModule.init(UID);
     initRamp();
+    initInfo();
 }
 
 // ======================================================
@@ -251,6 +280,36 @@ void setup() {
 
 void loop()
 {
-    vrxModule.updateChannelRamp();
-    crsfReceive();
+
+    // ======================================================
+    // Serial Mode Switch (only during config window)
+    // ======================================================
+    if (millis() - configWindowStart < CONFIG_WINDOW_MS)
+    {
+        if (Serial.available())
+        {
+            char c = Serial.read();
+
+            // Nur echte Ziffern akzeptieren
+            if (c >= '1' && c <= '3')
+            {
+                radioMode = (RadioMode)(c - '1');
+
+                LOG_INFO("RadioMode changed to %d", radioMode + 1);
+            }
+        }
+    }
+
+    // ======================================================
+    // Regular Mode
+    // ======================================================
+    if (radioMode != MODE_RX_ONLY)
+    {
+        vrxModule.updateChannelRamp();   // ESP-NOW senden
+    }
+
+    if (radioMode != MODE_TX_ONLY)
+    {
+        crsfReceive();                   // ESP-NOW empfangen
+    }
 }

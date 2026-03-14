@@ -10,6 +10,8 @@ int16_t espnow_len = 0;
 int16_t crsf_len = 0;
 bool espnow_received = false;
 
+uint16_t rc_channels[MAX_CHANNELS] = {0};
+
 uint8_t  hud_num_sats = 0;
 float    hud_grd_spd = 0;
 int16_t  hud_bat1_volts = 0;
@@ -42,8 +44,8 @@ uint32_t gpsGood_millis = 0;
 
 void crsfReceive()
 {
-    if (espnow_len <= 0)
-        return;
+    //if (espnow_len <= 0)
+    //    return;
 
     int16_t len = espnow_len;
     espnow_len = 0;
@@ -56,6 +58,26 @@ void crsfReceive()
 
     switch (crsf_id)
     {
+
+        case CHANNELS_ID:
+        {
+            // RC Channels dekodieren
+            crsf.decodeRC();
+
+            // Werte übernehmen
+            for(int i = 0; i < MAX_CHANNELS; i++)
+            {
+                rc_channels[i] = crsf.pwm_val[i];
+            }
+
+            LOG_INFO("RC: CH1=%d CH2=%d CH3=%d CH4=%d",
+                    rc_channels[0],
+                    rc_channels[1],
+                    rc_channels[2],
+                    rc_channels[3]);
+        }
+        break;
+
         /* ================= GPS ================= */
         case GPS_ID:
         {
