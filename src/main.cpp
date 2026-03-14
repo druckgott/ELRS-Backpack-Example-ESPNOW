@@ -4,16 +4,23 @@
 #pragma message "ESP8266 stuff happening!"
 #endif
 
+// ===== Logging Level =====
+//#define LOG_LEVEL LOG_LEVEL_INFO   // oder INFO
+#define LOG_LEVEL LOG_LEVEL_INFO
+//#define LOG_LEVEL LOG_LEVEL_DEBUG
+#include "logging.h"
+
 // ======================================================
 // 1. Includes
 // ======================================================
 
-//#include <terseCRSF.h>  // https://github.com/zs6buj/terseCRSF   use v 0.0.6 or later
-#include "crsf.h"  // Einbinden der crsf.h
+#include <terseCRSF.h>  // https://github.com/zs6buj/terseCRSF   use v 0.0.6 or later
 #include "msp.h"   // MSP Paket Handling
 #include "msptypes.h"
 #include "fake_vrx_fake_trainer.h"
 #include <math.h>
+#include "application.h"
+#include "types.h"
 
 // ======================================================
 // 2. Platform Selection (ESP32 / ESP8266)
@@ -28,6 +35,13 @@
 #include <espnow.h>
 #endif
 
+enum RadioMode
+{
+    MODE_RX_ONLY = 0,
+    MODE_TX_ONLY = 1,
+    MODE_BOTH    = 2
+};
+
 // ======================================================
 // 3. Configuration (Defines, UID, WiFi, Logging)
 // ======================================================
@@ -41,12 +55,36 @@
 //uint8_t UID[6] = {0,0,0,0,0,0}; // this is my UID. You have to change it to your once, should look 
 uint8_t UID[6] = {106,19,19,206,193,30};
 
+
+// ======================================================
+// RadioMode Configuration
+// ======================================================
+//
+// MODE_RX_ONLY  : Only receive ESP-NOW data (telemetry).
+//                 Sending (trainer/VTX channels) is disabled.
+//
+// MODE_TX_ONLY  : Only send ESP-NOW data (trainer/VTX channels).
+//                 Receiving telemetry is disabled.
+//
+// MODE_BOTH     : Send and receive ESP-NOW data.
+//                 Full bidirectional operation.
+//
+// You can change the default mode below.
+// It can also be changed later via Serial commands.
+// ======================================================
+RadioMode radioMode = MODE_BOTH;   // Default startup mode
+
+// Time window (in milliseconds) after boot during which
+// the RadioMode can be changed via Serial commands.
+// After this time, the mode becomes fixed.
+const unsigned long CONFIG_WINDOW_MS = 5000;  // 5 seconds
+
 // ===== AP Wifi Config =====
 const char* ssid = "Backpack_ELRS_Crsf";           // SSID des Access Points
 const char* password = "12345678";                  // Passwort des Access Points
 
 // ===== Config for Channel output =====
-#define NUM_CHANNELS 16
+const uint8_t NUM_CHANNELS = 16;
 #define CHANNEL_MIN 172
 #define CHANNEL_MAX 1811
 // ===== in the Example there is a wave for the output channels that you can see the channes are moving
@@ -54,24 +92,21 @@ const char* password = "12345678";                  // Passwort des Access Point
 float wavePhase = 0.0;
 #define STEP_INTERVAL 100   // 100ms Offset for each channel when the wave starts to the channel bevor
 
-// ===== Logging Level =====
-//#define LOG_LEVEL LOG_LEVEL_INFO   // oder INFO
-#define LOG_LEVEL LOG_LEVEL_DEBUG
-#include "logging.h"
-
 // ======================================================
 // 4. Global Objects
 // ======================================================
 
+
+unsigned long configWindowStart = 0;
 uint16_t rampChannels[NUM_CHANNELS];
 uint32_t lastStepTime = 0;
 uint8_t activeChannel = 0;
 bool rampUp = true;
 
-// ======================================================
-// CRSF Interface
-// ======================================================
-extern CRSF crsf;  // Instanziierung des CRSF-Objekts
+volatile bool espnow_received = false;
+volatile uint16_t espnow_len = 0;
+uint8_t espnow_buffer[250];
+volatile uint16_t crsf_len = 0;
 
 // ======================================================
 // Platform Specific
@@ -85,6 +120,31 @@ QueueHandle_t rxqueue;
 // ======================================================
 FakeVRXFakeTrainer vrxModule;
 MSP recv_msp;
+CRSF crsf;
+
+// ===============================
+// RC Channels
+// ===============================
+uint16_t rc_channels[NUM_CHANNELS] = {0};
+
+// ===============================
+// Telemetry Values
+// ===============================
+int16_t hud_bat1_volts = 0;
+int16_t hud_bat1_amps  = 0;
+uint16_t hud_bat1_mAh  = 0;
+
+bool motArmed = false;
+
+// ===============================
+// GPS Struct
+// ===============================
+
+Location hom = {0,0,0,0,0};
+Location cur = {0,0,0,0,0};
+
+// ===============================
+bool finalHomeStored = false;
 
 // ======================================================
 // ESP-NOW Receive Callback
@@ -95,50 +155,18 @@ void OnDataRecv(const uint8_t *mac, const uint8_t *incomingData, int len) {
 void OnDataRecv(uint8_t * mac, uint8_t *incomingData, uint8_t len) {
 #endif
 
-#if LOG_LEVEL >= LOG_LEVEL_DEBUG
-LOG_DEBUG("ESPNow RX len=%d", len);
+    if (len <= 8) return;
 
-char hexBuffer[256];
-int pos = 0;
+    crsf_len = len - 8;
 
-for (int i = 0; i < len && pos < sizeof(hexBuffer) - 3; i++) {
-    pos += snprintf(&hexBuffer[pos], sizeof(hexBuffer) - pos,
-                    "%02X ", incomingData[i]);
-}
+    memcpy(crsf.crsf_buf, incomingData + 8, crsf_len);
 
-LOG_DEBUG("Data: %s", hexBuffer);
-#endif
-  // For CRSF protocol from here
-  espnow_len = len;
-  crsf_len = len - 8;
-  espnow_received = true;
-  //memcpy(&crsf.crsf_buf, &*(incomingData+8), sizeof(crsf.crsf_buf));
-  memcpy(&crsf.crsf_buf, incomingData + 8, sizeof(crsf.crsf_buf));
-
-  // MSP Parsing
-  for(int i = 0; i < len; i++) {
-      if (recv_msp.processReceivedByte(incomingData[i])) {
-        recv_msp.markPacketReceived();
-      }
-  }
+    espnow_received = true;
 }
 
 // ======================================================
 // ESP-NOW Send Callback
 // ======================================================
-/*#if defined(ESP32)
-void OnDataSent(const uint8_t *mac_addr, esp_now_send_status_t status) {
-#else
-void OnDataSent(uint8_t *mac_addr, uint8_t status) {
-#endif
-
-    if (status == 0) {
-        LOG_DEBUG("ESP-NOW Send OK");
-    } else {
-        LOG_WARN("ESP-NOW Send FAIL - Backpack nicht erreichbar (status=%d)", status);
-    }
-
-}*/
 
 #if defined(ESP32)
 void OnDataSent(const uint8_t *mac_addr, esp_now_send_status_t status) {
@@ -151,9 +179,9 @@ void OnDataSent(uint8_t *mac_addr, uint8_t status) {
 #endif
 
     if (success) {
-        LOG_DEBUG("ESP-NOW Send OK");
+        LOG_DEBUG_INLINE("ESP-NOW Send OK          ");
     } else {
-        LOG_WARN("ESP-NOW Send FAIL (Status: %d)", status);
+        LOG_ERROR_INLINE("ESP-NOW Send FAIL (Status: %d) t=%lu ms      ", status, millis());
     }
 }
 
@@ -235,6 +263,28 @@ void initESP32Queue()
 #endif
 }
 
+void initInfo()
+{
+    LOG_INFO("==================================================");
+    LOG_INFO("Radio Mode Configuration");
+    LOG_INFO("Viewpoint: ESP Module Role (not the RC transmitter)");
+    LOG_INFO("--------------------------------------------------");
+    LOG_INFO("RX_ONLY : ESP receives ESP-NOW data and decodes it.");
+    LOG_INFO("          Sending is disabled.");
+    LOG_INFO("TX_ONLY : ESP sends ESP-NOW data.");
+    LOG_INFO("          Receiving/decoding is disabled.");
+    LOG_INFO("BOTH    : Full bidirectional operation.");
+    LOG_INFO("--------------------------------------------------");
+    LOG_INFO("Config window active for %lu ms", CONFIG_WINDOW_MS);
+    LOG_INFO("Change mode via Serial during this window:");
+    LOG_INFO("  1 = RX_ONLY");
+    LOG_INFO("  2 = TX_ONLY");
+    LOG_INFO("  3 = BOTH");
+    LOG_INFO("==================================================");
+
+    configWindowStart = millis();
+}
+
 void setup() {
     initSerial();
     initWiFi();
@@ -243,6 +293,7 @@ void setup() {
     initESPNow();
     vrxModule.init(UID);
     initRamp();
+    initInfo();
 }
 
 // ======================================================
@@ -251,6 +302,46 @@ void setup() {
 
 void loop()
 {
-    vrxModule.updateChannelRamp();
-    crsfReceive();
+
+    // ======================================================
+    // Serial Mode Switch (only during config window)
+    // ======================================================
+    if (millis() - configWindowStart < CONFIG_WINDOW_MS)
+    {
+        if (Serial.available())
+        {
+            char c = Serial.read();
+
+            // Nur echte Ziffern akzeptieren
+            if (c >= '1' && c <= '3')
+            {
+                radioMode = (RadioMode)(c - '1');
+
+                LOG_INFO("RadioMode changed to %d", radioMode + 1);
+            }
+        }
+    }
+
+    // ======================================================
+    // ESP-NOW Receive Handling (CRSF)
+    // ======================================================
+   if (radioMode != MODE_TX_ONLY)
+    {
+        if (espnow_received)
+        {
+            noInterrupts();
+            espnow_received = false;
+            interrupts();
+
+            processCRSFFrame(crsf.crsf_buf, crsf_len);
+        }
+    }
+
+    // ======================================================
+    // Regular Mode
+    // ======================================================
+    if (radioMode != MODE_RX_ONLY)
+    {
+        vrxModule.updateChannelRamp();   // ESP-NOW senden
+    }
 }

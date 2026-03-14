@@ -1,61 +1,55 @@
-// crsf.cpp
-#include "crsf.h"
+#include "application.h"
+#include "terseCRSF.h"
 #include "logging.h"
+#include "types.h"
+#include "crsf_defines.h"
 #include <math.h>
 #include <string>
 
-CRSF crsf;
+extern CRSF crsf;
 
-int16_t espnow_len = 0;
-int16_t crsf_len = 0;
-bool espnow_received = false;
+extern int16_t hud_bat1_volts;
+extern int16_t hud_bat1_amps;
+extern uint16_t hud_bat1_mAh;
 
-uint8_t  hud_num_sats = 0;
-float    hud_grd_spd = 0;
-int16_t  hud_bat1_volts = 0;
-int16_t  hud_bat1_amps = 0;
-uint16_t hud_bat1_mAh = 0;
+extern bool motArmed;
 
-struct Location {
-    float lat;
-    float lon;
-    float alt;
-    float hdg;
-    float alt_ag;
-};
+extern Location hom;
+extern Location cur;
 
-Location hom = {0,0,0,0,0};
-Location cur = {0,0,0,0,0};
+extern bool finalHomeStored;
 
-bool gpsGood = false;
-bool gpsfixGood = false;
-bool lonGood = false;
-bool latGood = false;
-bool altGood = false;
-bool hdgGood = false;
-bool motArmed = false;
-bool finalHomeStored = false;
+/* ===================== */
+/*        STATES         */
+/* ===================== */
 
-uint32_t gpsGood_millis = 0;
+static bool prevGpsGood = false;
+static std::string lastMode = "";
 
-/* ========================================================= */
+uint16_t channel[16];
 
-void crsfReceive()
+/* ===================== */
+/*     CRSF PROCESSING   */
+/* ===================== */
+
+void processCRSFFrame(uint8_t* buffer, uint16_t len)
 {
-    if (espnow_len <= 0)
+
+    // ================= RC CHANNELS =================
+    if (buffer[2] == CRSF_FRAMETYPE_RC_CHANNELS)   // CRSF_FRAMETYPE_RC_CHANNELS
+    {
+        LOG_INFO("RC Frame received (%d bytes)", len);
+        crsf.decodeRC();
         return;
+    }
 
-    int16_t len = espnow_len;
-    espnow_len = 0;
-
-    uint8_t crsf_id = crsf.decodeTelemetry(crsf.crsf_buf, len);
-
-#if LOG_LEVEL >= LOG_LEVEL_DEBUG
-    LOG_DEBUG("CRSF ID: 0x%02X", crsf_id);
-#endif
+    uint8_t crsf_id = crsf.decodeTelemetry(buffer, len);
 
     switch (crsf_id)
     {
+
+        
+
         /* ================= GPS ================= */
         case GPS_ID:
         {
@@ -63,21 +57,19 @@ void crsfReceive()
             cur.lon = crsf.gpsF_lon;
             cur.alt = crsf.gps_altitude;
 
-            gpsfixGood = (crsf.gps_sats >= 5);
-            lonGood = (crsf.gpsF_lon != 0.0f);
-            latGood = (crsf.gpsF_lat != 0.0f);
-            altGood = (crsf.gps_altitude != 0);
+            bool gpsfixGood = (crsf.gps_sats >= 5);
+            bool lonGood    = (crsf.gpsF_lon != 0.0f);
+            bool latGood    = (crsf.gpsF_lat != 0.0f);
+            bool altGood    = (crsf.gps_altitude != 0);
 
-            gpsGood = gpsfixGood && lonGood && latGood && altGood;
+            bool gpsGood = gpsfixGood && lonGood && latGood && altGood;
 
             if (finalHomeStored)
                 cur.alt_ag = cur.alt - hom.alt;
             else
                 cur.alt_ag = 0;
 
-            hud_num_sats = crsf.gps_sats;
-            hud_grd_spd  = crsf.gpsF_groundspeed;
-
+            /* ---- GPS LOG ---- */
             static float lastLat = 999;
             static float lastLon = 999;
 
@@ -94,8 +86,12 @@ void crsfReceive()
                 lastLon = cur.lon;
             }
 
-            if (gpsGood)
-                gpsGood_millis = millis();
+            /* ---- GPS STATUS CHANGE ---- */
+            if (gpsGood != prevGpsGood)
+            {
+                LOG_INFO("GPS Status changed: gpsGood=%d", gpsGood);
+                prevGpsGood = gpsGood;
+            }
 
         } break;
 
@@ -139,12 +135,22 @@ void crsfReceive()
 
         } break;
 
+                /* ================= LINK STATISTICS (0x14) ================= */
+        case LINK_ID:   // 0x14
+        {
+            LOG_INFO("LINK: RSSI1=%d RSSI2=%d Q=%d SNR=%d TX=%d RF=%d",
+                     crsf.link_up_rssi_ant_1,
+                     crsf.link_up_rssi_ant_2,
+                     crsf.link_up_quality,
+                     crsf.link_up_snr,
+                     crsf.link_up_tx_power,
+                     crsf.link_rf_mode);
+        } break;
+
         /* ================= FLIGHT MODE ================= */
         case FLIGHT_MODE_ID:
         {
             motArmed = (crsf.flightMode.compare("ARM") == 0);
-
-            static std::string lastMode = "";
 
             if (crsf.flightMode != lastMode)
             {
@@ -155,23 +161,12 @@ void crsfReceive()
                 lastMode = crsf.flightMode;
             }
 
-            gpsGood = (gpsfixGood && lonGood && latGood && altGood);
-
         } break;
 
         default:
-            break;
-    }
-
-    /* ================= GPS STATUS CHANGE ================= */
-
-    static bool prevGpsGood = false;
-
-    if (gpsGood != prevGpsGood)
-    {
-        LOG_INFO("GPS Status changed: gpsGood=%d",
-                 gpsGood);
-
-        prevGpsGood = gpsGood;
+        {
+            LOG_INFO("Unknown CRSF ID: 0x%02X", crsf_id);
+        }
+        break;
     }
 }
