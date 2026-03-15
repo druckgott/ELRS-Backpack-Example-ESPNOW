@@ -4,6 +4,12 @@
 #pragma message "ESP8266 stuff happening!"
 #endif
 
+// ===== Logging Level =====
+//#define LOG_LEVEL LOG_LEVEL_INFO   // oder INFO
+//#define LOG_LEVEL LOG_LEVEL_INFO
+#define LOG_LEVEL LOG_LEVEL_DEBUG
+#include "logging.h"
+
 // ======================================================
 // 1. Includes
 // ======================================================
@@ -48,6 +54,7 @@ enum RadioMode
 //uint8_t UID[6] = {0,0,0,0,0,0}; // this is my UID. You have to change it to your once, should look 
 uint8_t UID[6] = {106,19,19,206,193,30};
 
+
 // ======================================================
 // RadioMode Configuration
 // ======================================================
@@ -84,11 +91,6 @@ const char* password = "12345678";                  // Passwort des Access Point
 float wavePhase = 0.0;
 #define STEP_INTERVAL 100   // 100ms Offset for each channel when the wave starts to the channel bevor
 
-// ===== Logging Level =====
-//#define LOG_LEVEL LOG_LEVEL_INFO   // oder INFO
-#define LOG_LEVEL LOG_LEVEL_INFO
-#include "logging.h"
-
 // ======================================================
 // 4. Global Objects
 // ======================================================
@@ -99,10 +101,9 @@ uint32_t lastStepTime = 0;
 uint8_t activeChannel = 0;
 bool rampUp = true;
 
-// ======================================================
-// CRSF Interface
-// ======================================================
-extern CRSF crsf;  // Instanziierung des CRSF-Objekts
+volatile bool espnow_received = false;
+volatile uint16_t espnow_len = 0;
+uint8_t espnow_buffer[250];
 
 // ======================================================
 // Platform Specific
@@ -116,6 +117,7 @@ QueueHandle_t rxqueue;
 // ======================================================
 FakeVRXFakeTrainer vrxModule;
 MSP recv_msp;
+CRSF crsf;
 
 // ======================================================
 // ESP-NOW Receive Callback
@@ -126,32 +128,12 @@ void OnDataRecv(const uint8_t *mac, const uint8_t *incomingData, int len) {
 void OnDataRecv(uint8_t * mac, uint8_t *incomingData, uint8_t len) {
 #endif
 
-#if LOG_LEVEL >= LOG_LEVEL_DEBUG
-LOG_DEBUG("ESPNow RX len=%d", len);
+    if (len > sizeof(espnow_buffer))
+        return;
 
-char hexBuffer[256];
-int pos = 0;
-
-for (int i = 0; i < len && pos < sizeof(hexBuffer) - 3; i++) {
-    pos += snprintf(&hexBuffer[pos], sizeof(hexBuffer) - pos,
-                    "%02X ", incomingData[i]);
-}
-
-LOG_DEBUG("Data: %s", hexBuffer);
-#endif
-  // For CRSF protocol from here
-  espnow_len = len;
-  crsf_len = len - 8;
-  espnow_received = true;
-  //memcpy(&crsf.crsf_buf, &*(incomingData+8), sizeof(crsf.crsf_buf));
-  memcpy(&crsf.crsf_buf, incomingData + 8, sizeof(crsf.crsf_buf));
-
-  // MSP Parsing
-  for(int i = 0; i < len; i++) {
-      if (recv_msp.processReceivedByte(incomingData[i])) {
-        recv_msp.markPacketReceived();
-      }
-  }
+    memcpy(espnow_buffer, incomingData, len);
+    espnow_len = len;
+    espnow_received = true;
 }
 
 // ======================================================
@@ -301,15 +283,57 @@ void loop()
     }
 
     // ======================================================
+    // ESP-NOW Receive Handling
+    // ======================================================
+    if (espnow_received)
+    {
+        uint16_t len;
+
+        noInterrupts();
+        len = espnow_len;
+        espnow_received = false;
+        interrupts();
+
+        if (len > 8 && len <= sizeof(espnow_buffer))
+        {
+            uint8_t crsfLength = len - 8;
+
+            memcpy(crsf.crsf_buf, espnow_buffer + 8, crsfLength);
+
+            // Erst dekodieren, um die Frame-ID zu bekommen
+            uint8_t crsf_id = crsf.decodeTelemetry(crsf.crsf_buf, crsfLength);
+
+            LOG_DEBUG("CRSF ID: 0x%02X", crsf_id);
+
+            // ⭐ WICHTIG: Nur wenn es ein RC-Frame ist
+            if (crsf_id == CHANNELS_ID)
+            {
+                crsf.decodeRC();   // <-- HIER gehört es hin
+
+                for (int i = 0; i < MAX_CHANNELS; i++)
+                {
+                    rc_channels[i] = crsf.pwm_val[i];
+                }
+
+                LOG_INFO("RC: CH1=%d CH2=%d CH3=%d CH4=%d",
+                        rc_channels[0],
+                        rc_channels[1],
+                        rc_channels[2],
+                        rc_channels[3]);
+            }
+        }
+    }
+
+    // ======================================================
     // Regular Mode
     // ======================================================
-    if (radioMode != MODE_RX_ONLY)
+    if (radioMode != MODE_TX_ONLY)
     {
         vrxModule.updateChannelRamp();   // ESP-NOW senden
     }
 
-    if (radioMode != MODE_TX_ONLY)
-    {
-        crsfReceive();                   // ESP-NOW empfangen
-    }
+    //if (radioMode != MODE_RX_ONLY)
+    //{
+    //    crsfReceive();                   // ESP-NOW empfangen
+    //}
 }
