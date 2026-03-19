@@ -1,0 +1,1 @@
+v0.0.8 extended with Vario ID und Baro Alt

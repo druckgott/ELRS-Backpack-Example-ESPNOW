@@ -377,11 +377,13 @@ uint8_t CRSF::decodeTelemetry(uint8_t *_buf, uint8_t len)
       gps_sats = (uint8_t)_buf[17];
       break;
     case CF_VARIO_ID:
-#if defined SHOW_CRSF_CF_VARIO 
-      log.print("CF_VARIO:");
-      printBytes(&*_buf, len); // plus header and crc bytes
-#endif 
-      break;
+    {
+        // 2 Byte: vertical speed in cm/s
+        vario = bytes2int16(&_buf[3]);
+        varioF = vario / 100.0f;
+        // Debug falls Frame länger ist als erwartet
+    }
+    break;
     case BATTERY_ID:
       bat_voltage = bytes2uint16(&_buf[3]);           // mV * 100
       batF_voltage = (float)bat_voltage * 0.1;        // volts
@@ -392,11 +394,11 @@ uint8_t CRSF::decodeTelemetry(uint8_t *_buf, uint8_t len)
       bat_remaining = (uint8_t)_buf[10];              // percent
       break;
     case BARO_ALT_ID:
-#if defined SHOW_CRSF_BARO     
-      log.print("BARO_ALT:");
-      printBytes(&*_buf, len); // plus header and crc bytes
-#endif
-       break; 
+    {
+        // Rohwert aus Frame auslesen
+        baro_altitude  = bytes2uint16(&_buf[3]);  
+    }
+    break;
     case HEARTBEAT_ID:
 #if defined SHOW_CRSF_HEARTBEAT 
       log.print("HEARTBEAT:");

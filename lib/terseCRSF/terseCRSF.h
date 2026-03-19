@@ -132,6 +132,10 @@ float       gpsF_heading = 0.0;       // deg
 int16_t     gps_altitude = 0;         // metres, 1000m offset
 uint8_t     gps_sats = 0;
 
+/* VARIO ID:0x07 */
+int16_t vario = 0;     // raw cm/s
+float   varioF = 0.0f; // m/s
+
 /* Battery ID:0x08 */
 uint16_t    bat_voltage = 0;           // mV * 100
 float       batF_voltage = 0.0;        // volts
@@ -140,6 +144,10 @@ float       batF_current = 0.0;        // amps
 uint32_t    bat_fuel_drawn = 0;        // uint24_t    mAh drawn
 float       batF_fuel_drawn = 0.0;     // Ah drawn
 uint8_t     bat_remaining = 0;         // percent
+
+/* Barometer / Altitude ID:0x09 */
+uint16_t baro_altitude = 0;    // Rohwert (z.B. cm oder 0.01 m)
+float    baro_altitudeF = 0.0f; // skaliert als float (z.B. Meter)
 
 /* Link Statistics ID 0x14*/
 uint8_t     link_up_rssi_ant_1 = 0;         // dBm * -1

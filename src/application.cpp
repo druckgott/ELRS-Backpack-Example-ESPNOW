@@ -95,6 +95,28 @@ void processCRSFFrame(uint8_t* buffer, uint16_t len)
 
         } break;
 
+        /* ================= VARIO ================= */
+        case CF_VARIO_ID:
+        {
+            // crsf.decodeTelemetry(buffer, len) hat bereits crsf.vario / crsf.varioF gesetzt
+
+            // rohdaten in cm/s
+            int16_t climb_cm = crsf.vario;
+
+            // in m/s für Berechnungen / Logging
+            float climb_m_s = crsf.varioF;
+
+            static float lastClimb = 999.0f;
+
+            // nur loggen, wenn sich Wert geändert hat
+            if (fabs(climb_m_s - lastClimb) > 0.01f)
+            {
+                LOG_INFO("VARIO: %+.2f m/s (%d cm/s)", climb_m_s, climb_cm);
+                lastClimb = climb_m_s;
+            }
+
+        } break;
+
         /* ================= BATTERY ================= */
         case BATTERY_ID:
         {
@@ -113,6 +135,15 @@ void processCRSFFrame(uint8_t* buffer, uint16_t len)
 
                 lastVolt = hud_bat1_volts;
             }
+
+        } break;
+
+        /* ================= BAROMETER ================= */
+        case BARO_ALT_ID:
+        {
+            // Rohwert aus CRSF-Klasse
+            uint16_t alt_raw = crsf.baro_altitude;
+            LOG_INFO("BARO: raw=%u", alt_raw);
 
         } break;
 
@@ -165,7 +196,18 @@ void processCRSFFrame(uint8_t* buffer, uint16_t len)
 
         default:
         {
-            LOG_INFO("Unknown CRSF ID: 0x%02X", crsf_id);
+            LOG_INFO("Unknown CRSF ID: 0x%02X (len=%d)", crsf_id, len);
+
+            // komplettes Paket als HEX dump ausgeben
+            char hexString[512] = {0};
+            char* ptr = hexString;
+
+            for (uint16_t i = 0; i < len; i++)
+            {
+                ptr += sprintf(ptr, "%02X ", buffer[i]);
+            }
+
+            LOG_INFO("Frame Data: %s", hexString);
         }
         break;
     }
