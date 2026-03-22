@@ -43,6 +43,8 @@ uint8_t UID[6] = { ... };
 
  ![config screenshot](img/config.png)
  ![config screenshot](img/uid.png)
+
+ And Backback (without headtracker, if you want to get channels back you have to active Headtracker also)
 <img width="475" height="312" alt="Screenshot 2026-03-22 123222" src="https://github.com/user-attachments/assets/ac6c4348-ead1-44a8-ac6f-fea9a810f884" />
 
 ---
@@ -176,6 +178,8 @@ uint8_t UID[6] = { ... };
 
  ![config screenshot](img/config.png)
  ![config screenshot](img/uid.png)
+
+ Backpack, ohne Headtracker, wenn Kanäle zurückgesendet werden müssen, dann muss HT auch aktiviert werden
  <img width="475" height="312" alt="Screenshot 2026-03-22 123222" src="https://github.com/user-attachments/assets/ac6c4348-ead1-44a8-ac6f-fea9a810f884" />
  
 ---
