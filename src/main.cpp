@@ -207,7 +207,6 @@ void initSerial()
     LOG_INFO("Start");
 }
 
-// Globale Variable für die gefälschte Sende-Ziel-MAC auf dem ESP32
 
 void initWiFi()
 {
@@ -248,7 +247,6 @@ void initESPNow()
     esp_now_register_recv_cb(OnDataRecv);
 
     #if defined(ESP32)
-        if (esp_now_add_peer(&peerInfo) != ESP_OK) {
         // Für den ESP32 müssen wir hier keine Sende-Peers registrieren.
         // Der RX-Empfang geht automatisch.
         // Das TX-Senden (Senden an sich selbst) wird über den L2-Raw-Bypass 
