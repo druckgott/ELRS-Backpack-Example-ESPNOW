@@ -154,7 +154,12 @@ bool finalHomeStored = false;
 // ESP-NOW Receive Callback
 // ======================================================
 #if defined(ESP32)
+#if ESP_ARDUINO_VERSION_MAJOR >= 3
+// Arduino-ESP32 3.x / ESP-IDF 5.x changed the recv callback signature
+void OnDataRecv(const esp_now_recv_info_t *info, const uint8_t *incomingData, int len) {
+#else
 void OnDataRecv(const uint8_t *mac, const uint8_t *incomingData, int len) {
+#endif
 #else
 void OnDataRecv(uint8_t * mac, uint8_t *incomingData, uint8_t len) {
 #endif
@@ -181,9 +186,16 @@ void OnDataRecv(uint8_t * mac, uint8_t *incomingData, uint8_t len) {
 // ======================================================
 
 #if defined(ESP32)
+#if ESP_ARDUINO_VERSION_MAJOR >= 3
+// Arduino-ESP32 3.x / ESP-IDF 5.x changed the send callback signature
+void OnDataSent(const wifi_tx_info_t *tx_info, esp_now_send_status_t status) {
+    // Beim ESP32 ist status 0 (ESP_NOW_SEND_SUCCESS)
+    bool success = (status == ESP_NOW_SEND_SUCCESS);
+#else
 void OnDataSent(const uint8_t *mac_addr, esp_now_send_status_t status) {
     // Beim ESP32 ist status 0 (ESP_NOW_SEND_SUCCESS)
     bool success = (status == ESP_NOW_SEND_SUCCESS);
+#endif
 #else
 void OnDataSent(uint8_t *mac_addr, uint8_t status) {
     // Beim ESP8266 ist status 0 meist Erfolg
