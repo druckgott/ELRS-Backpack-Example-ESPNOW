@@ -6,8 +6,8 @@
 
 // ===== Logging Level =====
 //#define LOG_LEVEL LOG_LEVEL_INFO   // oder INFO
-#define LOG_LEVEL LOG_LEVEL_INFO
-//#define LOG_LEVEL LOG_LEVEL_DEBUG
+//#define LOG_LEVEL LOG_LEVEL_INFO
+#define LOG_LEVEL LOG_LEVEL_DEBUG
 #include "logging.h"
 
 // ======================================================
@@ -53,8 +53,23 @@ enum RadioMode
 //enter your binding phrase, then make a note of the UID. Enter the 6 numbers between the commas
 // Config Elrs Binding
 //uint8_t UID[6] = {0,0,0,0,0,0}; // this is my UID. You have to change it to your once, should look 
-uint8_t UID[6] = {106,19,19,206,193,30};
+//uint8_t UID[6] = {106,19,19,206,193,30};
+// ======================================================
+// 3. Configuration (Defines, UID, WiFi, Logging)
+// ======================================================
 
+// Prüfen, ob die externe Config-Datei existiert
+#if __has_include("my_config.h")
+#include "my_config.h"
+#endif
+
+// Wenn die Config geladen wurde und die UID definiert ist, nimm diese.
+// Andernfalls nimm den Standard-Fallback.
+#ifdef MY_CUSTOM_UID
+uint8_t UID[6] = MY_CUSTOM_UID;
+#else
+uint8_t UID[6] = {106,19,19,206,193,30};
+#endif
 
 // ======================================================
 // RadioMode Configuration
@@ -108,6 +123,10 @@ volatile uint16_t espnow_len = 0;
 uint8_t espnow_buffer[250];
 volatile uint16_t crsf_len = 0;
 
+#if defined(ESP32)
+portMUX_TYPE mux = portMUX_INITIALIZER_UNLOCKED;
+#endif
+
 // ======================================================
 // Platform Specific
 // ======================================================
@@ -155,11 +174,19 @@ void OnDataRecv(const uint8_t *mac, const uint8_t *incomingData, int len) {
 void OnDataRecv(uint8_t * mac, uint8_t *incomingData, uint8_t len) {
 #endif
 
-    if (len <= 8) return;
+    if (len <= 8 || incomingData == NULL) return;
+
+    if (incomingData[8] == 0 && incomingData[9] == 0 && len > 10) {
+        return; 
+    }
 
     crsf_len = len - 8;
 
-    memcpy(crsf.crsf_buf, incomingData + 8, crsf_len);
+    if (crsf_len > sizeof(espnow_buffer)) {
+        crsf_len = sizeof(espnow_buffer);
+    }
+
+    memcpy(espnow_buffer, incomingData + 8, crsf_len);
 
     espnow_received = true;
 }
@@ -198,23 +225,27 @@ void initSerial()
 void initWiFi()
 {
     UID[0] &= ~0x01;   // unicast fix
-    WiFi.mode(WIFI_STA);
-    //WiFi.mode(WIFI_AP_STA); // Ermöglicht AP und Station gleichzeitig
     WiFi.disconnect();
+
     #if defined(ESP32)
-    esp_wifi_set_channel(1, WIFI_SECOND_CHAN_NONE);
+        WiFi.mode(WIFI_STA); 
+        // DAS IST PFLICHT FÜR DEN RAW-FRAME:
+        esp_wifi_set_protocol(WIFI_IF_STA, WIFI_PROTOCOL_11B);
     #else
-        wifi_set_channel(1);
+        WiFi.mode(WIFI_STA);
     #endif
 }
 
 void initMac()
 {
-#if defined(ESP32)
-    esp_wifi_set_mac(WIFI_IF_STA, UID);
-#else
-    wifi_set_macaddr(STATION_IF, UID);
-#endif
+    #if defined(ESP32)
+        esp_wifi_set_mac(WIFI_IF_STA, UID);
+        esp_wifi_start(); 
+        esp_wifi_set_channel(1, WIFI_SECOND_CHAN_NONE);
+    #else
+        wifi_set_macaddr(STATION_IF, UID);
+        wifi_set_channel(1);
+    #endif
 }
 
 void initESPNow()
@@ -233,15 +264,11 @@ void initESPNow()
     esp_now_register_recv_cb(OnDataRecv);
 
     #if defined(ESP32)
-        esp_now_peer_info_t peerInfo = {};
-        memcpy(peerInfo.peer_addr, UID, 6);
-        peerInfo.channel = 0;
-        peerInfo.encrypt = false;
-    if (esp_now_add_peer(&peerInfo) != ESP_OK)
-            LOG_ERROR("Peer add failed");
+        // KEINE PEER REGISTRIERUNG MEHR NÖTIG!
+        // Der custom_esp_now_send Bypass feuert an der API vorbei.
     #else
         esp_now_set_self_role(ESP_NOW_ROLE_COMBO);
-        esp_now_add_peer(UID, ESP_NOW_ROLE_COMBO, 0, NULL, 0);
+        esp_now_add_peer(UID, ESP_NOW_ROLE_COMBO, 1, NULL, 0);
     #endif
 }
 
@@ -287,6 +314,7 @@ void initInfo()
 
 void setup() {
     initSerial();
+    delay(3000);
     initWiFi();
     initMac();
     initESP32Queue();
@@ -329,11 +357,25 @@ void loop()
     {
         if (espnow_received)
         {
-            noInterrupts();
-            espnow_received = false;
-            interrupts();
+            uint16_t len_to_process = 0;
 
-            processCRSFFrame(crsf.crsf_buf, crsf_len);
+            #if defined(ESP32)
+            portENTER_CRITICAL(&mux);
+            #else
+            noInterrupts();
+            #endif
+
+            len_to_process = crsf_len;
+            memcpy(crsf.crsf_buf, espnow_buffer, len_to_process);
+            espnow_received = false;
+
+            #if defined(ESP32)
+            portEXIT_CRITICAL(&mux);
+            #else
+            interrupts();
+            #endif
+
+            processCRSFFrame(crsf.crsf_buf, len_to_process);
         }
     }
 

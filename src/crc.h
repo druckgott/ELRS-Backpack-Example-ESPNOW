@@ -1,4 +1,8 @@
 #pragma once
+#if defined(ESP32)
+  #include <esp_attr.h>
+  #define ICACHE_RAM_ATTR IRAM_ATTR
+#endif
 #include <stdint.h>
 #include <Arduino.h>
 

@@ -3,3 +3,6 @@
 .vscode/c_cpp_properties.json
 .vscode/launch.json
 .vscode/ipch
+src/my_config.h
+current_prob.txt
+current_prob2.txt
