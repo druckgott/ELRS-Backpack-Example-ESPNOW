@@ -53,8 +53,8 @@ enum RadioMode
 //enter your binding phrase, then make a note of the UID. Enter the 6 numbers between the commas
 // Config Elrs Binding
 //uint8_t UID[6] = {0,0,0,0,0,0}; // this is my UID. You have to change it to your once, should look 
-uint8_t UID[6] = {106,19,19,206,193,30};
-
+//uint8_t UID[6] = {106,19,19,206,193,30};
+uint8_t UID[6] = {139,196,5,180,197,77};
 
 // ======================================================
 // RadioMode Configuration
@@ -208,9 +208,6 @@ void initSerial()
 }
 
 // Globale Variable für die gefälschte Sende-Ziel-MAC auf dem ESP32
-#if defined(ESP32)
-uint8_t fake_target_mac[6];
-#endif
 
 void initWiFi()
 {
@@ -251,27 +248,11 @@ void initESPNow()
     esp_now_register_recv_cb(OnDataRecv);
 
     #if defined(ESP32)
-        // DER FIX FÜR DEN ESP32:
-        // Wir erstellen eine gefälschte Ziel-MAC, indem wir das letzte Byte leicht abändern.
-        // Damit umgehen wir die Hardware-Sperre für "Senden an sich selbst".
-        memcpy(fake_target_mac, UID, 6);
-        fake_target_mac[5] ^= 0xFF; // Ändert z.B. 4D zu B2 -> Für den ESP32 ein fremdes Gerät!
-
-        esp_now_peer_info_t peerInfo = {};
-        memcpy(peerInfo.peer_addr, fake_target_mac, 6);
-        peerInfo.channel = 1;
-        peerInfo.ifidx = WIFI_IF_STA; 
-        peerInfo.encrypt = false;
-        
-        esp_now_del_peer(fake_target_mac);
         if (esp_now_add_peer(&peerInfo) != ESP_OK) {
-            LOG_ERROR("Failed to add Fake-Peer");
-        }
-
-        // Wir biegen JEDEN Sendeaufruf der Library in dieser Datei automatisch 
-        // auf den registrierten Fake-Peer um. 
-        #define esp_now_send(peer, data, len) esp_now_send(fake_target_mac, data, len)
-
+        // Für den ESP32 müssen wir hier keine Sende-Peers registrieren.
+        // Der RX-Empfang geht automatisch.
+        // Das TX-Senden (Senden an sich selbst) wird über den L2-Raw-Bypass 
+        // in der fake_vrx_fake_trainer.cpp abgewickelt!
     #else
         // FÜR ESP8266: Bleibt komplett unverändert auf der Original-Logik
         esp_now_set_self_role(ESP_NOW_ROLE_COMBO);
