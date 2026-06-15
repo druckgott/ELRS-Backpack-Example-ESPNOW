@@ -53,8 +53,20 @@ enum RadioMode
 //enter your binding phrase, then make a note of the UID. Enter the 6 numbers between the commas
 // Config Elrs Binding
 //uint8_t UID[6] = {0,0,0,0,0,0}; // this is my UID. You have to change it to your once, should look 
-uint8_t UID[6] = {106,19,19,206,193,30};
+//uint8_t UID[6] = {106,19,19,206,193,30};
 
+// Prüfen, ob die externe Config-Datei existiert
+#if __has_include("my_config.h")
+#include "my_config.h"
+#endif
+
+// Wenn die Config geladen wurde und die UID definiert ist, nimm diese.
+// Andernfalls nimm den Standard-Fallback.
+#ifdef MY_CUSTOM_UID
+uint8_t UID[6] = MY_CUSTOM_UID;
+#else
+uint8_t UID[6] = {106,19,19,206,193,30};
+#endif
 
 // ======================================================
 // RadioMode Configuration
