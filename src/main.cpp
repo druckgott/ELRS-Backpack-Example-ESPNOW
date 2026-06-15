@@ -231,6 +231,7 @@ void initWiFi()
         WiFi.mode(WIFI_STA); 
         // DAS IST PFLICHT FÜR DEN RAW-FRAME:
         esp_wifi_set_protocol(WIFI_IF_STA, WIFI_PROTOCOL_11B);
+        esp_wifi_set_max_tx_power(8); //Problem with bad Antenna on esp32c3
     #else
         WiFi.mode(WIFI_STA);
     #endif
