@@ -5,9 +5,7 @@
 #endif
 
 // ===== Logging Level =====
-//#define LOG_LEVEL LOG_LEVEL_INFO   // oder INFO
-#define LOG_LEVEL LOG_LEVEL_INFO
-//#define LOG_LEVEL LOG_LEVEL_DEBUG
+//log level ing logging.h 
 #include "logging.h"
 
 // ======================================================
@@ -108,7 +106,6 @@ float wavePhase = 0.0;
 // 4. Global Objects
 // ======================================================
 
-
 unsigned long configWindowStart = 0;
 uint16_t rampChannels[NUM_CHANNELS];
 uint32_t lastStepTime = 0;
@@ -116,9 +113,13 @@ uint8_t activeChannel = 0;
 bool rampUp = true;
 
 volatile bool espnow_received = false;
+volatile uint16_t crsf_len = 0;
+
+#if defined(ESP32)
 volatile uint16_t espnow_len = 0;
 uint8_t espnow_buffer[250];
-volatile uint16_t crsf_len = 0;
+portMUX_TYPE mux = portMUX_INITIALIZER_UNLOCKED;
+#endif
 
 // ======================================================
 // Platform Specific
@@ -163,10 +164,24 @@ bool finalHomeStored = false;
 // ======================================================
 #if defined(ESP32)
 void OnDataRecv(const uint8_t *mac, const uint8_t *incomingData, int len) {
+    if (len <= 8 || incomingData == NULL) return;
+
+    if (incomingData[8] == 0 && incomingData[9] == 0 && len > 10) {
+        return; 
+    }
+
+    crsf_len = len - 8;
+
+    if (crsf_len > sizeof(espnow_buffer)) {
+        crsf_len = sizeof(espnow_buffer);
+    }
+
+    memcpy(espnow_buffer, incomingData + 8, crsf_len);
+
+    espnow_received = true;
+}
 #else
 void OnDataRecv(uint8_t * mac, uint8_t *incomingData, uint8_t len) {
-#endif
-
     if (len <= 8) return;
 
     crsf_len = len - 8;
@@ -175,6 +190,7 @@ void OnDataRecv(uint8_t * mac, uint8_t *incomingData, uint8_t len) {
 
     espnow_received = true;
 }
+#endif
 
 // ======================================================
 // ESP-NOW Send Callback
@@ -210,23 +226,30 @@ void initSerial()
 void initWiFi()
 {
     UID[0] &= ~0x01;   // unicast fix
-    WiFi.mode(WIFI_STA);
-    //WiFi.mode(WIFI_AP_STA); // Ermöglicht AP und Station gleichzeitig
-    WiFi.disconnect();
+    
     #if defined(ESP32)
-    esp_wifi_set_channel(1, WIFI_SECOND_CHAN_NONE);
+        WiFi.disconnect();
+        WiFi.mode(WIFI_STA); 
+        // DAS IST PFLICHT FÜR DEN RAW-FRAME:
+        esp_wifi_set_protocol(WIFI_IF_STA, WIFI_PROTOCOL_11B);
+        esp_wifi_set_max_tx_power(8); //Problem with bad Antenna on esp32c3
     #else
+        WiFi.mode(WIFI_STA);
+        //WiFi.mode(WIFI_AP_STA); // Ermöglicht AP und Station gleichzeitig
+        WiFi.disconnect();
         wifi_set_channel(1);
     #endif
 }
 
 void initMac()
 {
-#if defined(ESP32)
-    esp_wifi_set_mac(WIFI_IF_STA, UID);
-#else
-    wifi_set_macaddr(STATION_IF, UID);
-#endif
+    #if defined(ESP32)
+        esp_wifi_set_mac(WIFI_IF_STA, UID);
+        esp_wifi_start(); 
+        esp_wifi_set_channel(1, WIFI_SECOND_CHAN_NONE);
+    #else
+        wifi_set_macaddr(STATION_IF, UID);
+    #endif
 }
 
 void initESPNow()
@@ -245,12 +268,8 @@ void initESPNow()
     esp_now_register_recv_cb(OnDataRecv);
 
     #if defined(ESP32)
-        esp_now_peer_info_t peerInfo = {};
-        memcpy(peerInfo.peer_addr, UID, 6);
-        peerInfo.channel = 0;
-        peerInfo.encrypt = false;
-    if (esp_now_add_peer(&peerInfo) != ESP_OK)
-            LOG_ERROR("Peer add failed");
+        // KEINE PEER REGISTRIERUNG MEHR NÖTIG!
+        // Der custom_esp_now_send Bypass feuert an der API vorbei.
     #else
         esp_now_set_self_role(ESP_NOW_ROLE_COMBO);
         esp_now_add_peer(UID, ESP_NOW_ROLE_COMBO, 0, NULL, 0);
@@ -299,6 +318,9 @@ void initInfo()
 
 void setup() {
     initSerial();
+    #if defined(ESP32)
+    delay(3000);
+    #endif
     initWiFi();
     initMac();
     initESP32Queue();
@@ -314,7 +336,6 @@ void setup() {
 
 void loop()
 {
-
     // ======================================================
     // Serial Mode Switch (only during config window)
     // ======================================================
@@ -341,11 +362,20 @@ void loop()
     {
         if (espnow_received)
         {
+            #if defined(ESP32)
+            uint16_t len_to_process = 0;
+            portENTER_CRITICAL(&mux);
+            len_to_process = crsf_len;
+            memcpy(crsf.crsf_buf, espnow_buffer, len_to_process);
+            espnow_received = false;
+            portEXIT_CRITICAL(&mux);
+            processCRSFFrame(crsf.crsf_buf, len_to_process);
+            #else
             noInterrupts();
             espnow_received = false;
             interrupts();
-
             processCRSFFrame(crsf.crsf_buf, crsf_len);
+            #endif
         }
     }
 
@@ -355,5 +385,8 @@ void loop()
     if (radioMode != MODE_RX_ONLY)
     {
         vrxModule.updateChannelRamp();   // ESP-NOW senden
+        #if defined(ESP32)
+        delay(10);
+        #endif
     }
 }

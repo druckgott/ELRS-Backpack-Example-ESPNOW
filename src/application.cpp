@@ -122,16 +122,17 @@ void processCRSFFrame(uint8_t* buffer, uint16_t len)
         {
             hud_bat1_volts = crsf.batF_voltage;
             hud_bat1_amps  = crsf.batF_current;
-            hud_bat1_mAh   = crsf.batF_fuel_drawn * 1000;
+            hud_bat1_mAh   = crsf.bat_fuel_drawn;
 
             static int16_t lastVolt = -9999;
 
             if (hud_bat1_volts != lastVolt)
             {
-                LOG_INFO("BAT: %.1fV %.1fA %u%%",
+                LOG_INFO("BAT: %.1fV %.1fA %u%% %lumAh",
                          crsf.batF_voltage,
                          crsf.batF_current,
-                         crsf.bat_remaining);
+                         crsf.bat_remaining,
+                         (unsigned long)crsf.bat_fuel_drawn);
 
                 lastVolt = hud_bat1_volts;
             }
