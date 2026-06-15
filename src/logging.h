@@ -2,15 +2,20 @@
 #include <Arduino.h>
 
 /* ===== LOG LEVELS ===== */
-
 #define LOG_LEVEL_NONE  0
 #define LOG_LEVEL_ERROR 1
 #define LOG_LEVEL_WARN  2
 #define LOG_LEVEL_INFO  3
 #define LOG_LEVEL_DEBUG 4
 
+// =========================================================================
+// HIER STELLST DU DAS GLOBALE LOG-LEVEL EIN! (Für alle .cpp Dateien gültig)
+// =========================================================================
+#define CURRENT_LOG_LEVEL LOG_LEVEL_INFO 
+// =========================================================================
+
 #ifndef LOG_LEVEL
-  #define LOG_LEVEL LOG_LEVEL_INFO
+  #define LOG_LEVEL CURRENT_LOG_LEVEL
 #endif
 
 /* ===== LOG MACROS ===== */

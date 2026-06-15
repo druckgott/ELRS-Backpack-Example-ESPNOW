@@ -74,6 +74,11 @@ https://www.expresslrs.org/software/trainer-input/
 - Sometimes you must:
   - Restart the transmitter
   - Switch Trainer Mode multiple times
+  - Switch ELRS Config (Telemetry off - ESPNOW and HT-Enable on off also maybe multiple times)
+  ![ELRS Config 1](img/screen-2026-06-15-173347.bmp)
+  ![ELRS Config 2](img/screen-2026-06-14-174124.bmp)
+  ![ELRS Config 3](img/screen-2026-06-15-171914.bmp)
+  - maybe you have problems on esp32 then comment out this line in main.cpp: esp_wifi_set_max_tx_power(8); or change value
 - It may happen that:
   - 📡 Telemetry works
   - 🎮 Trainer signal is not detected

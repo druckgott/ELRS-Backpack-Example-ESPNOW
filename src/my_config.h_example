@@ -1,0 +1,4 @@
+#pragma once
+
+// Das ist deine Original-Anlage.
+#define MY_CUSTOM_UID {100,19,30,105,100,20}
